@@ -36,10 +36,6 @@ reduction is detected, this is recorded in the result object.
 
 .. todo::
 
-    - Refactor :class:`semistable_model.curves.plane_curves_valued.ProjectivePlaneCurve`
-      so that it has all methods we need. In particular, implement the construction
-      of its function field and the morphism from and to it, thus avoiding the bug
-      in the native `Curve` class of Sage (see https://github.com/sagemath/sage/issues/41643)
     - Look into the assumption made in :mod:`semistable_model.curves.cusp_resolution`
       that the ideal `J` has dimension `0`. There are examples where this is false!
     - Improve the performance of :func:`semistable_model.curves.approximate_factors.ApproximateRoot'
@@ -49,7 +45,7 @@ reduction is detected, this is recorded in the result object.
 """
 
 import hashlib
-from sage.all import QQ, Curve
+from sage.all import QQ
 from semistable_model.curves.plane_curves_valued import PlaneCurveOverValuedField
 from semistable_model.curves.cusp_resolution import resolve_cusp
 from semistable_model.curves.component_graphs_of_plane_curves import component_graph_of_GIT_stable_quartic
@@ -128,20 +124,34 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
 
     EXAMPLES:
 
-    The following example produces an error:
+    The following example produced an error in a previous version:
 
+        sage: from semistable_model.curves.stable_reduction_of_quartics import stable_reduction_of_quartic
         sage: R.<x,y,z> = QQ[]
         sage: F = -x^3*y - 8*x*y^3 - 7*x^3*z - 7*x^2*y*z + 5*x*y^2*z + 6*x^2*z^2 - 6*y*z^3
         sage: SR = stable_reduction_of_quartic(F, QQ.valuation(2)); SR  # long time
-        StableReductionResult(fail)
+        StableReductionResult(ok, type=0---0e)
 
-        sage: SR.warnings
-        ["Exception: unsupported operand parent(s) for +: ... over Finite Field in z2 of size 2^2'"]
+        sage: SR.git_extension
+        Number Field in a1 with defining polynomial x^4 + 2*x^2 + 4
 
-    The error is caused by a bug in sage, see issue https://github.com/sagemath/sage/issues/41643
-
-    Here is another error, which falsifies the assumption made in :mod:`semistable_model.curves.cusp_resolution`
-    that the ideal `J` has dimension `0`.
+        sage: SR.tail_data
+        {(z2 : z2 : 1): (2-adic valuation,
+         Projective Plane Curve over Finite Field in u2 of size 2^2 defined by x^3 + u2*y^2*z + (u2 + 1)*y*z^2,
+         1)}
+        
+        sage: SR.to_json_record()
+        {'id': 'c2dac3579f4dd19d',
+         'K_defpoly': 'QQ',
+         'K_gen': None,
+         'p': 2,
+         'F': '-x^3*y - 8*x*y^3 - 7*x^3*z - 7*x^2*y*z + 5*x*y^2*z + 6*x^2*z^2 - 6*y*z^3',
+         'reduction_type': '0---0e',
+         'git_dfe': [4, 2, 2],
+         'cusp_dfes': [[8, 1, 8]]}         
+    
+    The following example produces an error, which falsifies the assumption made in 
+    :mod:`semistable_model.curves.cusp_resolution` that the ideal `J` has dimension `0`.
 
         sage: F = 3*x^4 - 12*x^2*y^2 - 5*y^4 - 5*x^3*z - 8*x^2*y*z + 3*x*y^2*z + 18*y*z^3
         sage: SR = stable_reduction_of_quartic(F, QQ.valuation(3)); SR
@@ -175,8 +185,6 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
         # 3) resolve cusps -> tail types
         cusps = Xs.rational_cusps()
         # this is a list of `flags`
-        # below we need Xs to be an object of `Curve`
-        Xs = Curve(Xs.defining_polynomial()) 
         cusp_data = []  # list of pairs (P, "e"/"m")
         # must be a list of pairs (P, tail_type), where P is a *rational*
         # point and ``tail_type`` is "e" or "m"     
@@ -202,7 +210,6 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
         res.component_graph = G
         res.canonical_signature = G.canonical_signature()
         res.reduction_type = classify_genus3_type(G)
-
         res.status = "ok"
         return res
 
