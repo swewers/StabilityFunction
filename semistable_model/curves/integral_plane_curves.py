@@ -58,8 +58,10 @@ of its base field:
     Projective Plane Curve with defining polynomial x^3 + y^2*z over Finite Field of size 2
 
     sage: v = C.function(x/z); v
+    v
+
     sage: v.zeros()
-    [Place (u, v)]
+    [Place (u, 1/u*v^2)]
 
 Given a place on the function field of the curve, we can define the associated branch;
 it encodes the (integral) curve *and* the place.
@@ -74,29 +76,41 @@ it encodes the (integral) curve *and* the place.
     sage: br.place()
     Place (u, 1/u*v^2)
 
-The *center* of the branch is a point on the projective plane:
+The *center* of the branch is a closed point on the projective plane; however, this method
+has not yet been implemented:
 
-    sage: P = br.point(); P
+    sage: P = br.center()
+    ...
+    NotImplementedError:
+
+Since the branch is *rational* (i.e. its residue field is equal to the base field of the 
+ambient projective plane), we can use this method as an alternative, which return a 
+*rational point* on the projective plane over the residue field:
+
+    sage: P = br.center_as_rational_point(); P
     (0 : 0 : 1)
 
     sage: P.parent()
     Set of rational points of Projective Space of dimension 2 over Finite Field of size 2
 
-The center of a branch need not be a rational point; in any case, a *rational point* 
-on the projective plane over the residue field is returned:
+An example of the nonrational branch:
 
     sage: g = C.function((x^2+x*z+z^2)/z^2); g
     v^2 + v + 1
 
-    sage: q = g.zeros()[0]; q 
-    Place (u + 1, v^2 + v + 1)
+    sage: q = CurveBranch(C, g.zeros()[0]); q
+    Place (u + 1, v^2 + v + 1) on Projective Plane Curve ...
 
-    sage: P = CurveBranch(C, q).point(); P
+    sage: q.residue_field()
+    Finite Field in z2 of size 2^2
+
+    sage: P = q.center_as_rational_point(); P
     (z2 + 1 : 1 : 1)
 
     sage: P.parent()
     Set of rational points of Projective Space of dimension 2 over Finite Field in z2 of size 2^2
 
+    
 .. todo::
 
     - implement closed point as centers of branches/places, which are defined over the
@@ -106,7 +120,7 @@ on the projective plane over the residue field is returned:
 """
 
 from semistable_model.curves.plane_curves import ProjectivePlaneCurve
-from sage.all import SageObject, PolynomialRing, FunctionField, lcm, Set
+from sage.all import SageObject, PolynomialRing, FunctionField, lcm
 
 
 # ----------------------------------------------------------------------
@@ -238,29 +252,6 @@ class IntegralProjectivePlaneCurve(ProjectivePlaneCurve):
         """
         raise NotImplementedError
 
-    def place_to_point(self, v):
-        r""" Return the point at the place.
-        
-        INPUT:
-
-        - ``v`` -- a place of the function field of this curve
-
-        OUTPUT:
-
-        The center of ``v``, as a rational point on the projective
-        plane over the residue field of `v`.
-
-        """
-        pi = v.local_uniformizer()
-        _, _, red = v.residue_field()  # the reduction map
-        assert pi.valuation(v) == 1
-        coordinate_functions = self.coordinate_functions()
-        vals = [f.valuation(v) for f in coordinate_functions]
-        m = min(vals)
-        P = [red(f*pi**(-m)) for f in coordinate_functions]
-        k = v.residue_field()[0]
-        return self.projective_plane.base_extend(k)(P)
-
     def branches_at(self, P):
         """
         Return the branches of the curve at a singular point P.
@@ -311,7 +302,7 @@ class IntegralProjectivePlaneCurve(ProjectivePlaneCurve):
         """
         if not assume_reduced:
             S = S.reduce()    
-        x = self.polynomail_ring.gens()
+        x = self.polynomial_ring.gens()
         F = self.defining_polynomial()
         eqns = list(S.defining_polynomials())
         # check that C is not containd in S
@@ -605,7 +596,7 @@ def _ff_element_to_polynomial_quotient(f):
 # ----------------------------------------------------------------------
 
 class CurveBranch(SageObject):
-    r""" Return a curve branch.
+    r""" Return a branch on a an integral projective plane curve.
 
     INPUT:
 
@@ -615,12 +606,86 @@ class CurveBranch(SageObject):
     OUTPUT:
 
     an object representing the pair `(Y, v)`.
+    
+    The curve `Y` has to be an instance of :class:`IntegralProjectivePlaneCurve`. 
+    Currently, such a curve must be defined over a finite field.
 
+    The *center* of the branch is a closed point on the ambient projective plane.
+    
+    The *residue field* of the branch is the residue field of the valuation
+    on the function field of the curve `Y` corresponding to `v`
+    
+    The branch is called *rational* if its residue field is equal the base field
+    of the ambient projective plane.
+
+    Note that if the branch is rational then so is its center, but that the
+    converse is false in general. 
+
+    NOTE:
+
+    Currently, the method :meth:`center` has not yet been implemented. 
+    An alternative is the method :meth:`center_as_rational_point`; it
+    returns the center as a rational point on the base change of the
+    ambient projective to the residue field of the branch. 
+
+    WARNING:
+
+    If you want to use :meth:`center_as_rational_point` to compare
+    centers of different branches, this only works for *rational*
+    branches: in general, different branches with the same center may have
+    different residue fields and then the mehtod will not recognize 
+    equality of centers correctly.  
+
+    
+    EXAMPLES::
+
+        sage: from semistable_model.curves.integral_plane_curves import IntegralProjectivePlaneCurve, CurveBranch
+        sage: k = GF(3)
+        sage: R.<x,y,z> = k[]
+        sage: C = IntegralProjectivePlaneCurve(x^3 + y^2*z)
+        sage: v = C.function(x/z).zeros()[0]    # a branch at the cusp
+        sage: br = CurveBranch(C, v); br
+        Place (u, 1/u*v) on Projective Plane Curve with defining polynomial x^3 + y^2*z over Finite Field of size 3
+
+        sage: br.curve() == C
+        True
+
+        sage: br.place() == v
+        True
+
+    The residue field of the branch:
+
+        sage: br.residue_field()
+        Finite Field of size 3
+
+    Since the residue field equals the base field, the branch is rational:
+
+        sage: br.is_rational()
+        True
+
+    The center as a rational point on the ambient projective plane:
+
+        sage: br.center_as_rational_point()
+        (0 : 0 : 1)
+
+    A branch whose residue field is a proper extension is not rational:
+
+        sage: k = GF(7)
+        sage: R.<x,y,z> = k[]
+        sage: C = IntegralProjectivePlaneCurve(y^2*z + x^3 + x^2*z)
+        sage: v = C.function(x/z).zeros()[0]
+        sage: br = CurveBranch(C, v)
+        sage: br.residue_field().degree() > 1
+        True
+        sage: br.is_rational()
+        False
+    
     """
     def __init__(self, Y, v):
         self._curve = Y
         self._place = v
-        self._point = Y.place_to_closed_point(v)
+        self._is_rational = (Y.base_ring() == v.residue_field()[0])
+        self._compute_rational_point()
 
     def __repr__(self):
         return f"{self.place()} on {self.curve()}"
@@ -631,30 +696,87 @@ class CurveBranch(SageObject):
     def place(self):
         return self._place
     
-    def point(self):
-        r""" Return the point on the curve corresponding to this branch.
-        
-        NOTE:
+    def is_rational(self):
+        r""" Return whether this branch rational.
 
-        Currently, a *rational point* on the projective plane over the
-        residue field of the branch is returned. 
-
-        It would be desirable to implement two versions, 
-        :meth:`rational_point` and :meth_`closed_point`
-         
-        """
-        return self._point
-    
-    def rational_point(self):
-        r""" Return the corresponding rational point of the projective plane.
+        This means that the residue field of the branch is equal to the
+        base field of the ambient projective plane. It implies that the
+        center of the branch is a rational point. But note that the 
+        converse is false in general.
         
-        If the point is not rational, an error is raised.
         """
-        # raise NotImplementedError
-        # old version:
-        assert self.place().residue_field()[0] == self.curve().base_ring()
-        return self.curve().projective_plane(self.point())
+        return self._is_rational
     
     def residue_field(self):
         return self.place().residue_field()[0]
+    
+    def center(self):
+        r""" Return the center of this branch.
 
+        The returned object is a closed point on the projective plane which
+        is the ambient space of the curve on which this branch lives.
+
+        TODO:
+        
+        implement this!
+
+        """
+        raise NotImplementedError()
+    
+    def center_as_rational_point(self):
+        r""" Return the corresponding rational point of the projective plane.
+        
+        OUTPUT:
+
+        The center of this branch, as a rational point on the projective
+        plane over the residue field.
+
+        WARNING:
+
+        This object is safe to compare centers of different branches only when all 
+        branches are *rational* (i.e. have the same residue field as the base field
+        of the common ambient projective plane).
+        
+        """
+        return self._rational_point
+    
+    def rational_center(self):
+        r""" Return the center of this branch as a rational point.
+        
+        If the branch is not rational, an error is raised. 
+
+        This object can be used to compare centers of different branches, *assuming*
+        that all branches are rational.
+
+        """
+        if not self.is_rational():
+            raise ValueError("Branch is not rational.")
+        return self.center_as_rational_point()
+
+    def _compute_rational_point(self):
+        r""" Set _rational point.
+        
+        """
+        C = self.curve()
+        v = self.place()
+        pi = v.local_uniformizer()
+        k, _, red = v.residue_field()  # red is the reduction map of v
+        # v must be normalized for the following to work
+        assert pi.valuation(v) == 1
+
+        # we compute projective coordinates of the center,
+        # using the "standard coordinate functions" defining 
+        # the embedding of the curve into the plane
+        # Even though these coordiante functions depend on 
+        # the chosen "standard" affine chart, each possible 
+        # choice defines the same point
+        coordinate_functions = C.coordinate_functions()  
+        vals = [f.valuation(v) for f in coordinate_functions]
+        m = min(vals)
+        P = []
+        for f in coordinate_functions:
+            if f == 0:
+                P.append(k.zero())
+            else:
+                P.append(red(f*pi**(-m)))
+        self._rational_point = C.projective_plane.base_extend(k)(P)
