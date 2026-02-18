@@ -35,7 +35,6 @@ At present, only the non-hyperelliptic case is handled; if hyperelliptic
 reduction is detected, this is recorded in the result object.
 """
 
-from sage.all import Curve
 from semistable_model.curves.plane_curves_valued import PlaneCurveOverValuedField
 from semistable_model.curves.cusp_resolution import resolve_cusp
 from semistable_model.curves.component_graphs_of_plane_curves import component_graph_of_GIT_stable_quartic
@@ -104,17 +103,31 @@ def stable_reduction_of_quartic(F, v_K):
 
     EXAMPLES:
 
-    The following example produces an error:
+    The following example produced an error in an earlier version:
 
+        sage: from semistable_model.curves.stable_reduction_of_quartics import stable_reduction_of_quartic
         sage: R.<x,y,z> = QQ[]
         sage: F = -x^3*y - 8*x*y^3 - 7*x^3*z - 7*x^2*y*z + 5*x*y^2*z + 6*x^2*z^2 - 6*y*z^3
         sage: SR = stable_reduction_of_quartic(F, QQ.valuation(2)); SR  # long time
+        StableReductionResult(ok, type=0---0e, sig=(((0, 0, 0), (0, 1, 0)), (0, 3, 0)))
+
+        sage: SR.special_fiber
+        Projective Plane Curve with defining polynomial x^3*z + x^2*y*z + x*y^2*z + (z2 + 1)*y*z^3 over Finite Field in z2 of size 2^2
+
+        sage: SR.cusps
+        [Projective flag given by [z2, z2, 1] and (z2 + 1)*y + z]
+
+        sage: SR.tail_types
+        {(z2 : z2 : 1): 'e'}
+
+    Here is an example that still raises an error:
+
+        sage: F = 4*x^4 - 2*x*y^3 + 6*x^3*z + x*y*z^2 + 10*y^2*z^2 + 7*x*z^3 - 7*y*z^3 + 9*z^4
+        sage: SR = stable_reduction_of_quartic(F, QQ.valuation(3)); SR
         StableReductionResult(fail)
 
         sage: SR.warnings
-        ["Exception: unsupported operand parent(s) for +: ... over Finite Field in z2 of size 2^2'"]
-
-    The error is caused by a bug in sage, see issue https://github.com/sagemath/sage/issues/41643
+        ['Exception: there is no unique extension of 3-adic valuation from Rational Field ...]
 
     """
     K = F.base_ring()
@@ -146,9 +159,8 @@ def stable_reduction_of_quartic(F, v_K):
 
         # 3) resolve cusps -> tail types
         cusps = Xs.rational_cusps()
-        # this is a list of `flags`
+        res.cusps = cusps
         # below we need Xs to be an object of `Curve`
-        Xs = Curve(Xs.defining_polynomial()) 
         cusp_data = [] 
         # must be a list of pairs (P, tail_type), where P is a *rational*
         # point and ``tail_type`` is "e" or "m"     
@@ -160,13 +172,13 @@ def stable_reduction_of_quartic(F, v_K):
             M = T.map_coefficients(phi, v_L.residue_field()).map_coefficients(v_L.lift, L)
             cusp_model = XX.apply_matrix(M)
             _, E, _ = resolve_cusp(cusp_model.defining_polynomial(), v_L)
-            P = Xs.point(C.point)
+            P = Xs.projective_plane(C.point)
             if E.is_smooth():
+                res.tail_types[P] = "e"
                 cusp_data.append((P, "e"))
             else:
+                res.tail_types[P] = "m"
                 cusp_data.append((P, "m"))
-
-        # res.tail_types = {P:"e"/"m", ...}
 
         # 4) build component graph + classify
         G = component_graph_of_GIT_stable_quartic(Xs, cusp_data=cusp_data)

@@ -63,11 +63,9 @@ curves to the purely combinatorial invariants implemented by
 isomorphism testing, and classification in small genus).
 """
 
-
-from semistable_model.curves.plane_curves import ProjectivePlaneCurve
 from semistable_model.curves.component_graphs import ComponentGraph
-from sage.all import SageObject, Curve, Set, lcm, GF
-from itertools import product
+from sage.all import Set, lcm, GF
+
 
 
 def component_graph_of_GIT_stable_quartic(X, cusp_data=None, check_degree=True):
@@ -106,9 +104,10 @@ def component_graph_of_GIT_stable_quartic(X, cusp_data=None, check_degree=True):
 
     EXAMPLES:
 
+        sage: from semistable_model.curves.plane_curves import ProjectivePlaneCurve
         sage: k = GF(2)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve(x*y*z)
+        sage: X = ProjectivePlaneCurve(x*y*z)
         sage: G = component_graph_of_GIT_stable_quartic(X, check_degree=False); G
         abstract component graph of a semistable projective curve
 
@@ -130,7 +129,7 @@ def component_graph_of_GIT_stable_quartic(X, cusp_data=None, check_degree=True):
 
         sage: k = GF(3)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve((x^2+y^2-z^2)*((x-z)^2+y^2+z^2))
+        sage: X = ProjectivePlaneCurve((x^2+y^2-z^2)*((x-z)^2+y^2+z^2))
         sage: G = component_graph_of_GIT_stable_quartic(X)
         sage: print(G.as_text())
         Component graph of a semistable curve
@@ -147,7 +146,7 @@ def component_graph_of_GIT_stable_quartic(X, cusp_data=None, check_degree=True):
 
         sage: k = GF(2)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve(x^4 + x*y^2*z + x^2*z^2 + z^4)
+        sage: X = ProjectivePlaneCurve(x^4 + x*y^2*z + x^2*z^2 + z^4)
         sage: G = component_graph_of_GIT_stable_quartic(X)
         sage: print(G.as_text())
         Component graph of a semistable curve
@@ -164,28 +163,35 @@ def component_graph_of_GIT_stable_quartic(X, cusp_data=None, check_degree=True):
         v0 -- v0 : 1 (loops)
 
     """
-    # we want X to be an object of the native Curve class
-    if isinstance(X, ProjectivePlaneCurve):
-        X = Curve(X.defining_polynomial())
+    # checking assumptions
     assert X.defining_polynomial().is_squarefree(), "X must be reduced"
     if check_degree:
         assert X.degree() == 4, "X must be a quartic"
     k = X.base_ring()
     assert k.is_field() and k.is_finite(), "X has to be defined over a finite field"
+
+    # base change to the *splitting field* of X; this guarantees that
+    # 1. all componenent are absolutely irreducible
+    # 2. all singular points *and* their tangent lines are rational
+    # (in fact, 2. implies 1.) 
     k1  = splitting_field(X)
     if not k1 == k:
-        X = Curve(X.base_extend(k1))
+        X = X.base_change(k1)
         if not cusp_data is None:
             cusp_data = [(P.change_ring(k1), t) for P, t in cusp_data]
         k = k1
 
-    components = [Curve(Y) for Y in X.irreducible_components()]
+    # We recompute the irreducible components and the singular branches
+    # They are now all *rational* i.e. defined over the base field. 
+    # This allows us to compare centers of different branches; note that
+    # we use the method `.rational_center` for this
+    components = X.irreducible_components()
     branches = singular_branches(X, components)
-    singular_points = Set(b.rational_point() for b in branches)
+    singular_points = Set(b.rational_center() for b in branches)
     # this dictionary remembers all singular branches through a given point 
     bs_at_P = {}
     for b in branches:
-        bs_at_P.setdefault(b.rational_point(), []).append(b)
+        bs_at_P.setdefault(b.rational_center(), []).append(b)
 
     nodes = []
     cusps = []
@@ -238,20 +244,23 @@ def splitting_field(X):
 
     a finite extension of `k` over which 
 
-    - all irreducible components
-    - all singular points, and
-    - all branches at singular points 
+    - all irreducible components are absolutely irreducible
+    - all singular points are rational points of the ambient space, and
+    - all branches at singular points are *rational*, i.e. their residue
+      fields are equal to the base field.
     
-    are rational.
-
+    Note that the third condition implies the first two! Therefore, to compute 
+    a splitting field, it suffices to make all the singular branches rational.
+    
     
     EXAMPLES:
 
-    sage: from semistable_model.curves.component_graphs import splitting_field
+    sage: from semistable_model.curves.plane_curves import ProjectivePlaneCurve
+    sage: from semistable_model.curves.component_graphs_of_plane_curves import splitting_field
     sage: k = GF(7)
     sage: R.<x,y,z> = k[]
     sage: F = y^2*z + x^3 + x^2*z
-    sage: X = Curve(F)
+    sage: X = ProjectivePlaneCurve(F)
     sage: splitting_field(X)
     Finite Field in z2 of size 7^2
 
@@ -277,35 +286,22 @@ def singular_branches(X, components=None):
 
     EXAMPLES:
 
-    sage: from semistable_model.curves.component_graphs import singular_branches
+    sage: from semistable_model.curves.plane_curves import ProjectivePlaneCurve
+    sage: from semistable_model.curves.component_graphs_of_plane_curves import singular_branches
     sage: k = GF(7)
     sage: R.<x,y,z> = k[]
     sage: F = x^2 + y^2
-    sage: X = Curve(F)
+    sage: X = ProjectivePlaneCurve(F)
     sage: singular_branches(X)
-    [Place (1/z) on Projective Plane Curve over Finite Field of size 7 defined by x^2 + y^2]
+    [Place (u) on Projective Plane Curve with defining polynomial x^2 + y^2 over Finite Field of size 7]
 
     """
     if components is None:
-        components = [Curve(Y) for Y in X.irreducible_components()]
-    S = X.singular_subscheme().reduce()
-    I = S.defining_ideal()
-    R = I.ring()
+        components = X.irreducible_components()
+    S = X.plane_curve.singular_subscheme().reduce()
     ret = []
     for Y in components:
-        RY = Y.coordinate_ring()
-        coordinates = []
-        for x in R.gens():
-            xb = RY(x)
-            if not xb.is_zero() and not xb.is_unit():
-                coordinates.append(x)
-        places = Set()
-        for f, x in product(I.gens(), coordinates):
-            g = Y.function(f/x**f.degree())
-            if not g.is_zero():
-                places = places.union(Set(g.zeros()))
-        ret += [CurveBranch(Y, v) for v in places 
-                if all(f in Y.place_to_closed_point(v).prime_ideal() for f in I.gens())] 
+        ret += Y.intersection_branches(S)
     return ret
 
 def is_node(X, P):
@@ -325,16 +321,17 @@ def is_node(X, P):
     
     EXAMPLES:
 
+        sage: from semistable_model.curves.plane_curves import ProjectivePlaneCurve
         sage: k = GF(2)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve(x*y*z)
+        sage: X = ProjectivePlaneCurve(x*y*z)
         sage: P = X.point([1,0,0])
         sage: is_node(X, P)
         True
 
     Note that Sage's native method :meth:`is_ordinary_singularity` gives a false result:
 
-        sage: X.is_ordinary_singularity(P)
+        sage: X.plane_curve.is_ordinary_singularity(P)
         False
 
         sage: P = X.point([1,1,0])
@@ -343,7 +340,7 @@ def is_node(X, P):
 
     A nonsplit ordinary double point counts as a node, too:
 
-        sage: X = Curve(x^2 + x*y + y^2)
+        sage: X = ProjectivePlaneCurve(x^2 + x*y + y^2)
         sage: P = X.point([0,0,1])
         sage: is_node(X, P)
         True
@@ -352,15 +349,14 @@ def is_node(X, P):
 
         sage: k = GF(3)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve(x^3 + y^2*z)
+        sage: X = ProjectivePlaneCurve(x^3 + y^2*z)
         sage: P = X.point([0,0,1])
         sage: is_node(X, P)
         False
 
-
     """
-    assert P in X, "P must be a point on X"
-    x, y, z = X.ambient_space().coordinate_ring().gens()
+    assert P in X.plane_curve, "P must be a point on X"
+    x, y, z = X.projective_plane.coordinate_ring().gens()
     F = X.defining_polynomial()(x-P[0], y-P[1], z-P[2]).homogeneous_components()
     return not 1 in F.keys() and 2 in F.keys() and F[2].is_squarefree()
 
@@ -380,16 +376,17 @@ def is_cusp(X, P):
 
     EXAMPLES:
 
+        sage: from semistable_model.curves.plane_curves import ProjectivePlaneCurve
         sage: k = GF(2)
         sage: R.<x,y,z> = k[]
-        sage: X = Curve(y^2*z + x^3)
+        sage: X = ProjectivePlaneCurve(y^2*z + x^3)
         sage: P = X.point([0,0,1])
         sage: is_cusp(X, P)
         True
 
     """ 
-    assert P in X, "P must be a point on X"
-    x, y, z = X.ambient_space().coordinate_ring().gens()
+    assert X.defining_polynomial()(list(P)) == 0, "P must be a point on X"
+    x, y, z = X.polynomial_ring.gens()
     F = X.defining_polynomial()(x-P[0], y-P[1], z-P[2]).homogeneous_components()
     if 1 in F.keys() or not 2 in F.keys():
         # P is not a double point:
@@ -403,57 +400,4 @@ def is_cusp(X, P):
         return False
     L = F2.factor()[0][0]
     return not F[3] in L.parent().ideal(L)
-
-
-# -----------------------------------------------------------------------------
-
-#                      classes
-
-
-class CurveBranch(SageObject):
-    r""" Return a curve branch.
-
-    INPUT:
-
-    - ``Y`` -- an integral curve over a field
-    - ``v`` -- a place of the function of `Y`
-    
-    OUTPUT:
-
-    an object representing the pair `(Y, v)`.
-
-    """
-    def __init__(self, Y, v):
-        self._curve = Y
-        self._place = v
-        self._point = Y.place_to_closed_point(v)
-
-    def __repr__(self):
-        return f"{self.place()} on {self.curve()}"
-
-    def curve(self):
-        return self._curve
-    
-    def place(self):
-        return self._place
-    
-    def point(self):
-        r""" Return the point on the curve corresponding to this branch.
-        
-        Note that what is returned is a closed point of the curve. You cannot
-        use it directly to compare it with a point on another curve. 
-        """
-        return self._point
-    
-    def rational_point(self):
-        r""" Return the corresponding rational point of the projective plane.
-        
-        If the point is not rational, an error is raised.
-        """
-        assert self.point().degree() == 1, "the center of this point is not rational"
-        return self.curve().ambient_space().point(self.point().rational_point())
-    
-    def residue_field(self):
-        return self.place().residue_field()[0]
-
 
