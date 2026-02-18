@@ -15,7 +15,6 @@ from sage.all import *
 from semistable_model.finite_schemes import FiniteScheme
 from semistable_model.geometry_utils import _apply_matrix, _ult_line_transformation, _uut_line_transformation, _integral_line_transformation, _ult_plane_transformation, _uut_plane_transformation, _integral_plane_transformation, _ult_flag_transformation, _uut_flag_transformation, _integral_flag_transformation, _move_point_and_line_to_001_and_x0, _normalize_by_last_nonzero_entry
 
-
 class ProjectivePlaneCurve:
   r"""
   Construct a projective plane curve to the following conditions.
@@ -68,6 +67,17 @@ class ProjectivePlaneCurve:
   def degree(self):
     return self._degree
 
+  def point(self, P):
+    r""" Return the point on the ambient projective plane corresponding to P.
+    
+    INPUT:
+
+    - ``P`` -- anything that defines a point
+
+    This method is need for compatibility with sage's native Curve class.
+
+    """
+    return self.plane_curve(P)
 
   def base_change(self, R):
     r"""
@@ -762,6 +772,8 @@ class ProjectivePlaneCurve:
     r"""
     Return the list of irreducible components of `self`.
 
+    Note that the components are objects of :class:`IntegralProjectivePlaneCurve`.
+
     EXAMPLES:
       sage: R.<x0,x1,x2> = GF(2^3)[]
       sage: f = x0^4 + x1^4 + x2^4
@@ -785,9 +797,9 @@ class ProjectivePlaneCurve:
       [Projective Plane Curve with defining polynomial -x1 + x2,
        Projective Plane Curve with defining polynomial x0 + x1]
     """
-
-    return [ProjectivePlaneCurve(factor)
-            for factor, multiplicity in self._decompose]
+    from semistable_model.curves.integral_plane_curves import IntegralProjectivePlaneCurve
+    return [IntegralProjectivePlaneCurve(factor)
+            for factor, _ in self._decompose]
 
 
   def number_of_irred_comp(self):
