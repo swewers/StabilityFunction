@@ -36,6 +36,8 @@ reduction is detected, this is recorded in the result object.
 
 .. todo::
 
+    - fix the error with message "there is no unique extension of 3-adic valuation 
+      from Rational Field ...", see the examples below
     - Look into the assumption made in :mod:`semistable_model.curves.cusp_resolution`
       that the ideal `J` has dimension `0`. There are examples where this is false!
     - Improve the performance of :func:`semistable_model.curves.approximate_factors.ApproximateRoot'
@@ -150,7 +152,16 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
          'git_dfe': [4, 2, 2],
          'cusp_dfes': [[8, 1, 8]]}         
     
-    The following example produces an error, which falsifies the assumption made in 
+    Here is an example that still raises an error:
+
+        sage: F = 4*x^4 - 2*x*y^3 + 6*x^3*z + x*y*z^2 + 10*y^2*z^2 + 7*x*z^3 - 7*y*z^3 + 9*z^4
+        sage: SR = stable_reduction_of_quartic(F, QQ.valuation(3)); SR
+        StableReductionResult(fail)
+
+        sage: SR.warnings
+        ['Exception: there is no unique extension of 3-adic valuation from Rational Field ...]
+
+    The following example produces another error, which falsifies the assumption made in 
     :mod:`semistable_model.curves.cusp_resolution` that the ideal `J` has dimension `0`.
 
         sage: F = 3*x^4 - 12*x^2*y^2 - 5*y^4 - 5*x^3*z - 8*x^2*y*z + 3*x*y^2*z + 18*y*z^3
