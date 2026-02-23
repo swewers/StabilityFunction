@@ -161,15 +161,11 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
         sage: SR.warnings
         ['Exception: there is no unique extension of 3-adic valuation from Rational Field ...]
 
-    The following example produces another error, which falsifies the assumption made in 
-    :mod:`semistable_model.curves.cusp_resolution` that the ideal `J` has dimension `0`.
+    The following example shows that issue #65 has been fixed:
 
         sage: F = 3*x^4 - 12*x^2*y^2 - 5*y^4 - 5*x^3*z - 8*x^2*y*z + 3*x*y^2*z + 18*y*z^3
         sage: SR = stable_reduction_of_quartic(F, QQ.valuation(3)); SR
-        StableReductionResult(fail)
-
-        sage: SR.warnings
-        ['Exception: Expected dim(J)=0, got dim(J)=1.']
+        StableReductionResult(ok, type=0---0e)
 
     """
     K = F.base_ring()
