@@ -38,8 +38,7 @@ reduction is detected, this is recorded in the result object.
 
     - fix the error with message "there is no unique extension of 3-adic valuation 
       from Rational Field ...", see the examples below
-    - Look into the assumption made in :mod:`semistable_model.curves.cusp_resolution`
-      that the ideal `J` has dimension `0`. There are examples where this is false!
+    - add the thickness of singularity to the tail data
     - Improve the performance of :func:`semistable_model.curves.approximate_factors.ApproximateRoot'
       by simplifying the coefficients of a polynomial before evaluating it on the
       approximate root.
