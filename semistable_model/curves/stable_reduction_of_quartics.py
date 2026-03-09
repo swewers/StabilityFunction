@@ -135,11 +135,12 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
         StableReductionResult(ok, type=0---0e)
 
         sage: SR.git_extension
-        Number Field in a1 with defining polynomial x^4 + 2*x^2 + 4
+        Number Field in z2 with defining polynomial x^4 + 2*x^3 - x^2 - 2*x + 7
 
         sage: SR.tail_data
-        {(z2 : z2 : 1): (2-adic valuation,
-         Projective Plane Curve over Finite Field in u2 of size 2^2 defined by x^3 + u2*y^2*z + (u2 + 1)*y*z^2,
+        {(1 : 1 : 1): (2-adic valuation,
+         1/4,
+         Projective Plane Curve over Finite Field in u1 of size 2^2 defined by x^3 + y^2*z + y*z^2,
          1)}
         
         sage: SR.to_json_record()
@@ -181,19 +182,7 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
         XX = X.git_semistable_model_with_rational_cusps()
         v_L = XX.base_ring_valuation()
         L = v_L.domain()
-        # define the special fiber, with reduction and lifting maps
-        # this should later be moved to `plane_curve_valued`
-        k = v_L.residue_field()
-        k1 = GF(k.cardinality())
-        phi = k.an_embedding(k1)
-        phi_inv = phi.inverse()
-        red0 = v_L.reduce
-        red = lambda a: phi(red0(a))
-        lift0 = v_L.lift
-        lift = lambda a: lift0(phi_inv(a))
-        f = XX.defining_polynomial().map_coefficients(red, k1)
-        Xs = ProjectivePlaneCurve(f)
-        # Xs = XX.special_fiber()   # old code
+        Xs = XX.special_fiber()
         res.git_model = XX
         res.git_special_fiber = Xs
         res.git_extension = L
@@ -205,19 +194,11 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
             return res
 
         # 3) resolve cusps -> tail types
-        cusps = Xs.rational_cusps()
-        # this is a list of `flags`
+        # cusps = Xs.cusps()
+        cusps = Xs.cusps()
         cusp_data = []  # list of pairs (P, "e"/"m")
-        # must be a list of pairs (P, tail_type), where P is a *rational*
-        # point and ``tail_type`` is "e" or "m"     
         for C in cusps:
-            T = C.move_to_e0_x2()
-            # we want to lift T to a matrix in L; for this we first have
-            # to change the base ring of T to the residue field of v_L
-            M = T.map_coefficients(lift, L)
-            cusp_model = XX.apply_matrix(M)
-            tail = resolve_cusp(cusp_model.defining_polynomial(), v_L, 
-                                   compute_matrix=compute_matrix)
+            tail = XX.resolve_cusp(C)
             E = tail[2]
             P = Xs.point(C.point)
             res.tail_data[P] = tail
