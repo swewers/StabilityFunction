@@ -465,7 +465,6 @@ class ApproximateRoot(SageObject):
         self._extension_valuation = v_L
         # 3. initialize first approximation
         self._approximation = L.gen()
-        self._precision = g.precision()
         # 4. construct limit valuation
         self._init_limit_valuation()
 
@@ -514,9 +513,9 @@ class ApproximateRoot(SageObject):
     def approximation(self):
         r"""Return the current approximation of this root."""
         return self._approximation
-    
+
     def eval(self, r, simplify=True):
-        r""" Evaluate a polynomial on this approximate root.
+        r""" Evaluate a (possibly mltivariate) polynomial on this approximate root.
         
         INPUT:
 
@@ -537,7 +536,209 @@ class ApproximateRoot(SageObject):
             return v_L.simplify(r(a0), error=self.precision()+1, force=True)
         else:
             return r(a0)
-    
+
+    def eval_univ(self, r, simplify=True, err=None,
+                strategy="auto",
+                time_limit_fast=0.01,
+                time_limit_guarded=0.1,
+                guarded_every=3,
+                step_time_limit_guarded=0.02,
+                step_time_limit_safe=None,
+                pre_simplify=False,
+                debug=False):
+        r"""Evaluate a univariate polynomial on this approximate root.
+
+        INPUT:
+
+        - ``r`` -- a univariate polynomial over the base field `K`
+
+        - ``simplify`` -- boolean (default: ``True``); if ``True``, simplify
+            the final result to precision ``err`` before returning it
+
+        - ``err`` -- precision parameter for ``v_L.simplify``; if ``None``,
+            use ``self.precision() + 1``
+
+        - ``strategy`` -- one of:
+            - ``"auto"``    : try fast, then guarded, then safe
+            - ``"fast"``    : direct evaluation ``r(a0)``
+            - ``"guarded"`` : Horner evaluation with periodic simplification
+            - ``"safe"``    : Horner evaluation with simplification at every step
+
+        - ``time_limit_fast`` -- total timeout (in seconds) for the fast stage
+
+        - ``time_limit_guarded`` -- total timeout (in seconds) for the guarded stage
+
+        - ``guarded_every`` -- in guarded mode, simplify every
+            ``guarded_every`` Horner steps
+
+        - ``step_time_limit_guarded`` -- if one Horner step in guarded mode
+            takes longer than this many seconds, abort guarded mode and fall back
+            to safe mode
+
+        - ``step_time_limit_safe`` -- optional per-step timeout for safe mode;
+            if ``None``, no per-step timeout is enforced there
+
+        - ``pre_simplify`` -- if ``True``, simplify the running Horner value
+            before multiplication as well; this is sometimes helpful in
+            pathological examples
+
+        - ``debug`` -- boolean (default: ``False``); if set, print diagnostics
+
+        OUTPUT:
+
+        The value ``r(a0)``, where ``a0`` is the current approximation of
+        this approximate root.
+
+        NOTES:
+
+        This version pre-coerces the coefficients of ``r`` into the extension
+        field ``L`` once at the beginning. This avoids repeated coercions
+        ``K -> L`` inside the Horner loop, which can otherwise dominate the
+        cost and may contribute to PARI stack blow-ups.
+        """
+        import time
+
+        class _EvalTooSlow(Exception):
+            pass
+
+        v_L = self.extension_valuation()
+        a0 = self.approximation()
+        L = self.extension()
+        from sage.libs.pari.all import pari
+        pari.allocatemem(2 * 1024**3)
+        L._pari_nfzk()
+        print(f"L = {L} with base field {L.base_field()}")
+
+        if err is None:
+            err = self.precision() + 1
+
+        # Ensure r lies in the correct polynomial ring
+        try:
+            r = self.polynomial_ring()(r)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"r must be coercible into {self.polynomial_ring()} (got {r.parent()})")
+
+        def _finalize(x):
+            if simplify:
+                return v_L.simplify(x, error=err, force=True)
+            else:
+                return x
+
+        def _coeffs_in_extension(poly):
+            # Convert coefficients [a_0, ..., a_n] once into L.
+            # This is much safer than repeated coercion inside Horner.
+            return [L(c) for c in poly.list()]
+
+        coeffs = _coeffs_in_extension(r)
+
+        def _horner(coeffs,
+                    simplify_every=None,
+                    total_time_limit=None,
+                    step_time_limit=None,
+                    mode_name="horner"):
+            start = time.perf_counter()
+            value = L.zero()
+            max_dt = 0.0
+            max_k = 0
+
+            for k, a in enumerate(reversed(coeffs), start=1):
+                # Total timeout for this stage
+                if total_time_limit is not None and time.perf_counter() - start > total_time_limit:
+                    if debug:
+                        print(f"[{mode_name}] total timeout before step {k}")
+                    raise _EvalTooSlow(f"{mode_name}: total time limit exceeded")
+
+                if pre_simplify and simplify_every is not None and k > 1:
+                    value = v_L.simplify(value, error=err, force=True)
+
+                t0 = time.perf_counter()
+                value = value * a0 + a
+                dt = time.perf_counter() - t0
+
+                if dt > max_dt:
+                    max_dt = dt
+                    max_k = k
+
+                if debug:
+                    print(f"[{mode_name}] step {k}: dt={dt:.6f}s")
+
+                # Per-step timeout: this catches "one suddenly awful step"
+                if step_time_limit is not None and dt > step_time_limit:
+                    if debug:
+                        print(f"[{mode_name}] step timeout at step {k}: {dt:.6f}s > {step_time_limit:.6f}s")
+                    raise _EvalTooSlow(f"{mode_name}: step {k} exceeded step time limit")
+
+                if simplify_every is not None and k % simplify_every == 0:
+                    value = v_L.simplify(value, error=err, force=True)
+
+            if debug:
+                total = time.perf_counter() - start
+                print(f"[{mode_name}] done in {total:.6f}s; max step {max_k} took {max_dt:.6f}s")
+
+            return _finalize(value)
+
+        def _fast(poly, total_time_limit=None):
+            start = time.perf_counter()
+            value = poly(a0)
+            total = time.perf_counter() - start
+
+            if debug:
+                print(f"[fast] total={total:.6f}s")
+
+            if total_time_limit is not None and total > total_time_limit:
+                if debug:
+                    print(f"[fast] total timeout: {total:.6f}s > {total_time_limit:.6f}s")
+                raise _EvalTooSlow("fast: total time limit exceeded")
+
+            return _finalize(value)
+
+        if strategy == "fast":
+            return _fast(r)
+
+        elif strategy == "guarded":
+            return _horner(coeffs,
+                            simplify_every=guarded_every,
+                            total_time_limit=None,
+                            step_time_limit=step_time_limit_guarded,
+                            mode_name="guarded")
+
+        elif strategy == "safe":
+            return _horner(coeffs,
+                            simplify_every=1,
+                            total_time_limit=None,
+                            step_time_limit=step_time_limit_safe,
+                            mode_name="safe")
+
+        elif strategy == "auto":
+            # Stage 1: fast path
+            try:
+                return _fast(r, total_time_limit=time_limit_fast)
+            except Exception as e:
+                if debug:
+                    print(f"[auto] fast failed: {type(e).__name__}: {e}")
+
+            # Stage 2: guarded Horner
+            try:
+                return _horner(coeffs,
+                                simplify_every=guarded_every,
+                                total_time_limit=time_limit_guarded,
+                                step_time_limit=step_time_limit_guarded,
+                                mode_name="guarded")
+            except Exception as e:
+                if debug:
+                    print(f"[auto] guarded failed: {type(e).__name__}: {e}")
+
+            # Stage 3: safe Horner
+            return _horner(coeffs,
+                            simplify_every=1,
+                            total_time_limit=None,
+                            step_time_limit=step_time_limit_safe,
+                            mode_name="safe")
+
+        else:
+            raise ValueError("unknown strategy: {}".format(strategy))
+
     def precision(self):
         r""" Return a lower bound for the precision of the current approximation.
         
@@ -607,21 +808,21 @@ class ApproximateRoot(SageObject):
             return
         # we can assume that the approximation can be improve using Hensel's Lemma, 
         # i.e. Newton approximation
+        v_L = self.extension_valuation()
         f = self.polynomial()
         df = self.derivative()
-        v_L = self.extension_valuation()
         a0 = self.approximation()
-        t = self.precision()
-        a = v_L.simplify(a0 - f(a0)/df(a0), error=2*t + 1, force=True)
-        # compute the new precision
-        self._precision = v_L(f(a)) - v_L(df(a))
-        # simplify a to new precision
-        if self.precision() < 2*t:
-            a = self.extension_valuation().simplify(a, error=self.precision()+1, force=True)
-        self._approximation = a
-        self._count = self._count + 1
-        return a
-    
+        fa0 = self.eval_univ(f, err=2*self.precision()+10)
+        m = v_L(fa0)
+        s = self._s  # equal to v_L(f'(a0)), but known to be constant
+        # check that the previous estimate of the precision was correct
+        # this also guarantess that the precision increases 
+        assert m - s >= self.precision(), "precision estimate was wrong!"
+        dfa0 = self.eval_univ(df, err=2*self.precision() + 2*s + 1)  
+        self._approximation = v_L.simplify(a0 - fa0/dfa0, error=2*m-3*s + 1, force=True)
+        self._precision = 2*m - 3*s  # this should be a lower bound for v(a-a0)
+        self._count += 1
+            
     def _force_hensel(self):
         r""" Improve the approximation of the prime factor `g` so that
         approximations of the root can be improved using Hensel's Lemma.
@@ -645,6 +846,7 @@ class ApproximateRoot(SageObject):
             m = g.valuation()(f)
             s = g.valuation()(df)
         self._count = 0
+        self._s = s
         self._precision = m - s
     
     def _init_limit_valuation(self):
