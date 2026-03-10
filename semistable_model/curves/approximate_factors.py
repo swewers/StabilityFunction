@@ -465,7 +465,6 @@ class ApproximateRoot(SageObject):
         self._extension_valuation = v_L
         # 3. initialize first approximation
         self._approximation = L.gen()
-        self._precision = g.precision()
         # 4. construct limit valuation
         self._init_limit_valuation()
 
@@ -607,21 +606,21 @@ class ApproximateRoot(SageObject):
             return
         # we can assume that the approximation can be improve using Hensel's Lemma, 
         # i.e. Newton approximation
+        v_L = self.extension_valuation()
         f = self.polynomial()
         df = self.derivative()
-        v_L = self.extension_valuation()
         a0 = self.approximation()
-        t = self.precision()
-        a = v_L.simplify(a0 - f(a0)/df(a0), error=2*t + 1, force=True)
-        # compute the new precision
-        self._precision = v_L(f(a)) - v_L(df(a))
-        # simplify a to new precision
-        if self.precision() < 2*t:
-            a = self.extension_valuation().simplify(a, error=self.precision()+1, force=True)
-        self._approximation = a
-        self._count = self._count + 1
-        return a
-    
+        fa0 = f(a0)
+        m = v_L(fa0)
+        s = self._s  # equal to v_L(f'(a0)), but known to be constant
+        # check that the previous estimate of the precision was correct
+        # this also guarantess that the precision increases 
+        assert m - s >= self.precision(), "precision estimate was wrong!"
+        dfa0 = df(a0) 
+        self._approximation = v_L.simplify(a0 - fa0/dfa0, error=2*m-3*s + 1, force=True)
+        self._precision = 2*m - 3*s  # this should be a lower bound for v(a-a0)
+        self._count += 1
+   
     def _force_hensel(self):
         r""" Improve the approximation of the prime factor `g` so that
         approximations of the root can be improved using Hensel's Lemma.
@@ -646,6 +645,7 @@ class ApproximateRoot(SageObject):
             s = g.valuation()(df)
         self._count = 0
         self._precision = m - s
+        self._s = s  # this is v_L(f'(a0)), which will be constant  
     
     def _init_limit_valuation(self):
         r""" Construct the limit valuation corresponding to this approximate root,
