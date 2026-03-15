@@ -18,20 +18,25 @@
 #       --n-samples 500 \
 #       --prime 5 \
 #       --seed 12345 \
-#       --out /path/to/quartic_reduction_data/data/v1/p5.jsonl \
-#       --stats /path/to/quartic_reduction_data/data/v1/p5_stats.json
+#       --timeout 60 \
+#       --out /path/to/quartic_reduction_data/data/v1/p5_run_001
 #
 # This:
 #   - generates random smooth plane quartics over QQ,
 #   - computes their geometric stable reduction at p,
-#   - appends successful cases (status == "ok") to a JSONL file,
-#   - writes a JSON stats summary (including status/type counts).
+#   - aborts any single example after --timeout seconds (if --timeout > 0),
+#   - writes successful cases (status == "ok") to:
+#         /path/to/.../data.jsonl
+#   - writes aggregate stats to:
+#         /path/to/.../stats.json
+#   - writes all run parameters and a timestamp to:
+#         /path/to/.../run_parameters.json
 #
 # The raw data should be stored in a separate data repository
 # (e.g. “quartic_reduction_data”), not in the main code repository.
 #
 # The JSONL file contains one record per successful example.
-# The stats file contains aggregate counts (ok/hyperelliptic/fail)
+# The stats file contains aggregate counts (ok/hyperelliptic/fail/timeout)
 # and reduction-type frequencies.
 #
 # Run with --help for the full list of options.
@@ -42,11 +47,16 @@ import argparse
 import json
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from random import Random
 
 from sage.all import QQ, PolynomialRing, Curve
+from sage.parallel.decorate import fork
 from semistable_model.curves.stable_reduction_of_quartics import stable_reduction_of_quartic
+
+
+TIMEOUT_SENTINEL = "NO DATA (timed out)"
 
 
 # ------------------------------------------------------------
@@ -81,6 +91,38 @@ def write_run_stats(path, stats):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(stats, f, sort_keys=True, indent=2)
+
+
+def write_run_parameters(path, params):
+    """
+    Write the run parameters and timestamp to a JSON file (overwritten).
+    Creates parent directories if needed.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(params, f, sort_keys=True, indent=2)
+
+
+def _stable_reduction_summary(F, prime):
+    """
+    Compute stable reduction and return a small serializable summary.
+    This is used only for the timeout-enabled subprocess path.
+    """
+    v_K = QQ.valuation(prime)
+    SR = stable_reduction_of_quartic(F, v_K)
+    return {
+        "status": SR.status,
+        "reduction_type": getattr(SR, "reduction_type", None),
+        "json_record": SR.to_json_record(),
+    }
+
+
+def make_stable_reduction_worker(timeout):
+    @fork(timeout=timeout, verbose=False)
+    def _worker(F, prime):
+        return _stable_reduction_summary(F, prime)
+    return _worker
 
 
 # ------------------------------------------------------------
@@ -123,6 +165,7 @@ def random_int(rng, bound, p=None, rho=0.0, kmax=3):
 
     u = rng.randint(-bound, bound)
     return (p**K) * u
+
 
 def random_quartic_form_QQ(*, rng, n_terms=8, coeff_bound=20, p=None, rho=0.0, kmax=3):
     r"""
@@ -180,6 +223,7 @@ def run_experiment(
     rho=0.0,
     kmax=3,
     max_tries_factor=50,
+    timeout=0.0,
     verbose=True,
     store_only_ok=True,
 ):
@@ -198,6 +242,10 @@ def run_experiment(
     v_K = QQ.valuation(prime)
     rng = Random(seed)
 
+    timed_worker = None
+    if timeout > 0:
+        timed_worker = make_stable_reduction_worker(timeout)
+
     buckets = defaultdict(list)
 
     tries = 0
@@ -211,7 +259,7 @@ def run_experiment(
     def compute_counts():
         """
         Return (status_counts, type_counts, bucket_sizes).
-        - status_counts: counts for statuses ok/hyperelliptic/fail
+        - status_counts: counts for statuses ok/hyperelliptic/fail/timeout
         - type_counts: counts for reduction types among ok cases
         - bucket_sizes: legacy mixed dict (types + statuses) for backwards compatibility
         """
@@ -221,11 +269,12 @@ def run_experiment(
             "ok": 0,
             "hyperelliptic": bucket_sizes.get("hyperelliptic", 0),
             "fail": bucket_sizes.get("fail", 0),
+            "timeout": bucket_sizes.get("timeout", 0),
         }
 
         type_counts = {}
         for k, n in bucket_sizes.items():
-            if k in ("hyperelliptic", "fail"):
+            if k in ("hyperelliptic", "fail", "timeout"):
                 continue
             # everything else are reduction types (since key=SR.reduction_type for ok)
             type_counts[k] = n
@@ -248,6 +297,7 @@ def run_experiment(
             "n_terms": n_terms,
             "coeff_bound": coeff_bound,
             "max_tries_factor": max_tries_factor,
+            "timeout": timeout,
             "out_path": out_path,
             "final": bool(final),
             "status_counts": status_counts,
@@ -263,8 +313,14 @@ def run_experiment(
     while found < n_samples and tries < max_tries:
         tries += 1
 
-        F = random_quartic_form_QQ(rng=rng, n_terms=n_terms, coeff_bound=coeff_bound, 
-                                   p=prime, rho=rho, kmax=kmax)
+        F = random_quartic_form_QQ(
+            rng=rng,
+            n_terms=n_terms,
+            coeff_bound=coeff_bound,
+            p=prime,
+            rho=rho,
+            kmax=kmax,
+        )
 
         # accept only smooth quartics over QQ
         try:
@@ -278,21 +334,42 @@ def run_experiment(
             print(f"[{found}/{n_samples}] smooth quartic found")
             print(f"  F = {F}")
 
-        SR, t = timed_call(stable_reduction_of_quartic, F, v_K)
+        if timeout > 0:
+            out, t = timed_call(timed_worker, F, prime)
+            if out == TIMEOUT_SENTINEL:
+                status = "timeout"
+                reduction_type = None
+                bucket_value = {
+                    "status": "timeout",
+                    "quartic": str(F),
+                    "time_sec": t,
+                }
+                rec = dict(bucket_value)
+            else:
+                status = out["status"]
+                reduction_type = out["reduction_type"]
+                bucket_value = out
+                rec = out["json_record"]
+        else:
+            SR, t = timed_call(stable_reduction_of_quartic, F, v_K)
+            status = SR.status
+            reduction_type = getattr(SR, "reduction_type", None)
+            bucket_value = SR
+            rec = SR.to_json_record()
+
         t_total += t
 
         if verbose:
             print(f"  time = {t:.3f} sec")
-            print(f"  -> status={SR.status}, type={getattr(SR, 'reduction_type', None)}")
+            print(f"  -> status={status}, type={reduction_type}")
 
         # bucket key for in-memory summary
-        key = SR.reduction_type if SR.status == "ok" else SR.status
-        buckets[key].append(SR)
+        key = reduction_type if status == "ok" else status
+        buckets[key].append(bucket_value)
 
         # write to database
         if out_path is not None:
-            if (not store_only_ok) or SR.status == "ok":
-                rec = SR.to_json_record()
+            if (not store_only_ok) or status == "ok":
                 if rec is not None:
                     rec["time_sec"] = t
                     append_jsonl(out_path, rec)
@@ -330,6 +407,7 @@ def run_experiment(
         "status_counts": status_counts,
         "type_counts": type_counts,
         "bucket_sizes": bucket_sizes,
+        "timeout": timeout,
         "out_path": out_path,
         "stats_path": stats_path,
     }
@@ -357,27 +435,43 @@ def main():
     parser.add_argument("--max-tries-factor", type=int, default=50,
                         help="Max attempts = factor * n_samples (default: 50)")
     parser.add_argument("--out", type=str, default=None,
-                        help="Path to JSONL output file (append-only). If omitted, no file is written.")
-    parser.add_argument("--stats", type=str, default=None,
-                        help="Path to JSON stats file (overwritten). If omitted, no stats file is written.")
+                        help="Output directory. If provided, the script writes data.jsonl, stats.json, and run_parameters.json there.")
     parser.add_argument("--checkpoint-every", type=int, default=25,
                         help="Checkpoint interval in samples (default: 25; 0 disables).")
     parser.add_argument("--quiet", action="store_true",
                         help="Reduce output")
     parser.add_argument("--store-all", action="store_true",
-                        help='Store also "hyperelliptic"/"fail" (not recommended).')
+                        help='Store also "hyperelliptic"/"fail"/"timeout" (not recommended).')
     parser.add_argument("--rho", type=float, default=0.0,
-                    help="Geometric bias parameter for p-adic valuation of coefficients (default: 0.0 = uniform sampling).")
+                        help="Geometric bias parameter for p-adic valuation of coefficients (default: 0.0 = uniform sampling).")
     parser.add_argument("--kmax", type=int, default=3,
-                    help="Maximum exponent used in p-adic valuation bias (default: 3).")
+                        help="Maximum exponent used in p-adic valuation bias (default: 3).")
+    parser.add_argument("--timeout", type=float, default=0.0,
+                        help="Per-example wall-clock timeout in seconds (default: 0 = no timeout).")
 
     args = parser.parse_args()
+
+    out_path = None
+    stats_path = None
+
+    if args.out is not None:
+        out_dir = Path(args.out)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path = str(out_dir / "data.jsonl")
+        stats_path = str(out_dir / "stats.json")
+        params_path = out_dir / "run_parameters.json"
+
+        run_parameters = vars(args).copy()
+        run_parameters["timestamp_utc"] = datetime.now(timezone.utc).isoformat()
+
+        write_run_parameters(params_path, run_parameters)
 
     run_experiment(
         n_samples=args.n_samples,
         prime=args.prime,
-        out_path=args.out,
-        stats_path=args.stats,
+        out_path=out_path,
+        stats_path=stats_path,
         checkpoint_every=args.checkpoint_every,
         seed=args.seed,
         n_terms=args.n_terms,
@@ -385,6 +479,7 @@ def main():
         rho=args.rho,
         kmax=args.kmax,
         max_tries_factor=args.max_tries_factor,
+        timeout=args.timeout,
         verbose=(not args.quiet),
         store_only_ok=(not args.store_all),
     )
