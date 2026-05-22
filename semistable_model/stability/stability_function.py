@@ -722,7 +722,32 @@ class BTB_Point:
 
   def base_ring(self):
     return self._base_change_matrix.base_ring()
+  
 
+  def change_ring(self, v_L):
+    r""" Return the base change of this point to an extension of the base ring.
+    
+    INPUT:
+
+    - ``v_L`` -- the valuation on the extension field of the base ring
+
+    OUTPUT:
+
+    the point corresponding to ``self`` on the Bruhat-Tits building over `L`, 
+    the domain of the given valuation `v_L`.
+
+    EXAMPLES:
+
+    sage: v_K = QQ.valuation(2)
+    sage: R.<x> = QQ[]
+    sage: L = NumberField(x^2-2, "pi")
+    sage: v_L = v_K.extension(L)
+    sage: pt = BTB_Point(v_K, identity_matrix(QQ, 3, 3), (0,0,0))
+    sage: pt.change_ring(v_L)
+
+    """
+    return BTB_Point(v_L, self.base_change_matrix().change_ring(v_L.domain()), 
+                     self.weight_vector())
 
   def linear_valuation(self):
     r"""
