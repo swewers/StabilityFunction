@@ -121,8 +121,16 @@ class PlaneCurveOverValuedField(ProjectivePlaneCurve):
     # into one:
     from_K_to_L_abs, v_L = absolute_field(v_K, L)
     X_L = self.base_change(from_K_to_L_abs, v_L)
+    
     phiL = StabilityFunction(X_L.defining_polynomial(), v_L)
     _, b = phiL.global_minimum()
+    if not b.is_vertex():
+      # this may happen if the reduction is not properly stable because
+      # there minimizer of phi is not unique, and this point b is not
+      # the same as the one found by the function `semistable_reduction_field`
+      # see issue #70
+      # but we can force the extension L to have the required ramification index:
+      return self.git_semistable_model(b.ramification_index())
     T = b.move_to_origin().base_change_matrix()
     return PlaneModel(X_L, T)
 

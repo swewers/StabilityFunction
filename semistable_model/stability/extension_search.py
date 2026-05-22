@@ -1,6 +1,6 @@
 from warnings import warn
 from itertools import product, count
-from sage.all import gcd, PolynomialRing, QQ, ZZ, ceil, matrix, GaussValuation, vector, Infinity
+from sage.all import gcd, lcm, PolynomialRing, QQ, ZZ, ceil, matrix, GaussValuation, vector, Infinity
 from semistable_model.stability import StabilityFunction, minimum_as_valuative_function
 from semistable_model.curves import ProjectivePlaneCurve
 from semistable_model.geometry_utils import _unipotent_integral_matrices
@@ -16,6 +16,7 @@ def semistable_reduction_field(homogeneous_form,
   has a model with semistable reduction.
   If `ramification_index` is not `None` try to find
   an extension of provided ramification index.
+
   """
   if not homogeneous_form.is_homogeneous():
     raise ValueError(f"{homogeneous_form} is not homogeneous.")
@@ -26,7 +27,7 @@ def semistable_reduction_field(homogeneous_form,
                             ramification_index)
 
   p = base_ring_valuation.residue_ring().characteristic()
-  for i in count(start=1):
+  for i in count(start=0):
     L = extension_search(homogeneous_form, base_ring_valuation, p**i)
     if L is not None:
       return L
@@ -73,7 +74,10 @@ def extension_search(homogeneous_form,
     piK = base_ring_valuation.uniformizer()
     r_K = base_ring_valuation(piK).denominator()
     r_L = btb_point.ramification_index()
+    # make sure that r divides the required ramification index
     r = r_L / gcd(r_K, r_L)
+    if ramification_index is not None:
+      r = lcm(r, ramification_index)
     S = PolynomialRing(K, 'x')
     s = S.gen()
     L = K.extension(s**r - piK, 'piL')

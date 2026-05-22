@@ -168,8 +168,22 @@ def stable_reduction_of_quartic(F, v_K, compute_matrix=False):
     This example shows that the problem described in commit d3eca6a has been fixed:
 
         sage: F = -8*x^4 - 2*y^4 + 4*x^3*z + y^3*z + 5*x^2*z^2 - 4*y^2*z^2 + 5*z^4
-        sage: SR = stable_reduction_of_quartic(F, QQ.valuation(2)); SR
+        sage: SR = stable_reduction_of_quartic(F, QQ.valuation(3)); SR
         StableReductionResult(ok, type=1ee)
+
+    This example shows that issue #70 has been fixed:
+
+        sage: F = 5*x^3*y - 8*x^2*y^2 - 2*x*y^3 + 8*x^3*z - 6*x^2*z^2 + 3*x*y*z^2 + 10*y^2*z^2 - 2*x*z^3
+        sage: SR = stable_reduction_of_quartic(F, QQ.valuation(2)); SR
+        StableReductionResult(hyperelliptic)
+
+    In this example, a PARI stack overflow occurs, due to explosion of coefficients:
+
+        sage: F = -x^3*y + 5*x^2*y^2 - 5*x*y^3 - 6*y^4 - 3*x^3*z - y^3*z + 3*y*z^3
+        sage: SR = stable_reduction_of_quartic(F, v_K); SR
+        StableReductionResult(fail)
+        sage: SR.warnings
+        ['Exception: the PARI stack overflows ... try again']
 
     """
     K = F.base_ring()
