@@ -370,10 +370,20 @@ def run_experiment(
         # write to database
         if out_path is not None:
             if (not store_only_ok) or status == "ok":
-                if rec is not None:
-                    rec["time_sec"] = t
-                    append_jsonl(out_path, rec)
-                    stored += 1
+                if rec is None:
+                    rec = {
+                        "status": status,
+                        "reduction_type": reduction_type,
+                        "quartic": str(F),
+                    }
+                else:
+                    rec.setdefault("status", status)
+                    rec.setdefault("reduction_type", reduction_type)
+                    rec.setdefault("quartic", str(F))
+
+                rec["time_sec"] = t
+                append_jsonl(out_path, rec)
+                stored += 1
 
         # periodic checkpoint
         if checkpoint_every and (found % checkpoint_every == 0):
