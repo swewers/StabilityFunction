@@ -19,9 +19,7 @@ def semistable_reduction_field(homogeneous_form,
   """
   if not homogeneous_form.is_homogeneous():
     raise ValueError(f"{homogeneous_form} is not homogeneous.")
-  if not base_ring_valuation.domain() == QQ:
-    raise NotImplementedError(f"The base ring must be {QQ}")
-
+  
   if ramification_index is not None:
     return extension_search(homogeneous_form,
                             base_ring_valuation,
@@ -65,9 +63,7 @@ def extension_search(homogeneous_form,
     raise ValueError(f"{homogeneous_form} is not homogeneous")
   if homogeneous_form.base_ring() != base_ring_valuation.domain():
     raise ValueError(f"The base ring of {homogeneous_form} is not {base_ring_valuation.domain()}")
-  if homogeneous_form.base_ring() is not QQ:
-    raise NotImplementedError(f"The base ring must be {QQ}")
-
+  
   K = homogeneous_form.base_ring()
   phi = StabilityFunction(homogeneous_form, base_ring_valuation)
   minimum, btb_point = phi.global_minimum('uut')
@@ -81,7 +77,7 @@ def extension_search(homogeneous_form,
     S = PolynomialRing(K, 'x')
     s = S.gen()
     L = K.extension(s**r - piK, 'piL')
-    return L.absolute_field('piL')
+    return L
 
   R = homogeneous_form.parent()
   S = PolynomialRing(K, 'x')
@@ -149,7 +145,7 @@ def _search_tree(F, valuation1, step, minimum, trafo_matrix, depth, depth_limit)
     S = PolynomialRing(K, 'x')
     s = S.gen()
     L = K.extension(s**r - piK, 'piL')
-    return L.absolute_field('piL')
+    return L
 
   for k in count():
     new_radius = adjusted_radius - k * step
